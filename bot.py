@@ -2,10 +2,22 @@ import os
 import requests
 from bs4 import BeautifulSoup
 
+SENT_FILE = "sent.txt"
 
-def get_latest_personal_history():
-  url = "https://www.newyorker.com/culture/personal-history"
-  # Include a standard User-Agent header to prevent blocking
+
+def get_sent_links():
+  if not os.path.exists(SENT_FILE):
+    return set()
+  with open(SENT_FILE, "r") as f:
+    return set(line.strip() for line in f if line.strip())
+
+
+def save_sent_link(link):
+  with open(SENT_FILE, "a") as f:
+    f.write(link + "\n")
+
+
+def get_next_unread_essay(sent_links):
   headers = {
       "User-Agent": (
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
@@ -13,30 +25,36 @@ def get_latest_personal_history():
       )
   }
 
-  response = requests.get(url, headers=headers)
-  if response.status_code != 200:
-    raise Exception(f"Failed to fetch page, status code: {response.status_code}")
+  # Check page 1 first, then dig deeper into archive pages (page/2, page/3, etc.)
+  for page in range(1, 25):
+    url = (
+        "https://www.newyorker.com/culture/personal-history"
+        if page == 1
+        else f"https://www.newyorker.com/culture/personal-history/page/{page}"
+    )
 
-  soup = BeautifulSoup(response.text, "html.parser")
+    response = requests.get(url, headers=headers)
+    if response.status_code != 200:
+      break
 
-  # Extract links belonging to the personal history section
-  article_links = []
-  for a in soup.find_all("a", href=True):
-    href = a["href"]
-    if (
-        "/culture/personal-history/" in href
-        and href != "/culture/personal-history"
-    ):
-      if href.startswith("/"):
-        href = "https://www.newyorker.com" + href
-      if href not in article_links:
-        article_links.append(href)
+    soup = BeautifulSoup(response.text, "html.parser")
 
-  if not article_links:
-    raise Exception("No personal history essays found.")
+    for a in soup.find_all("a", href=True):
+      href = a["href"]
+      if (
+          "/culture/personal-history/" in href
+          and "/page/" not in href
+          and href != "/culture/personal-history"
+      ):
+        if href.startswith("/"):
+          href = "https://www.newyorker.com" + href
+        # Strip any tracking query parameters so URLs match cleanly
+        href = href.split("?")[0]
 
-  # The first link is typically the newest entry
-  return article_links[0]
+        if href not in sent_links:
+          return href
+
+  raise Exception("No unread personal history essays found!")
 
 
 def send_to_discord(webhook_url, article_url):
@@ -56,6 +74,9 @@ if __name__ == "__main__":
   if not webhook_url:
     raise Exception("DISCORD_WEBHOOK_URL environment variable not set.")
 
-  latest_essay = get_latest_personal_history()
-  print(f"Found latest essay: {latest_essay}")
-  send_to_discord(webhook_url, latest_essay)
+  sent_links = get_sent_links()
+  next_essay = get_next_unread_essay(sent_links)
+
+  print(f"Sending essay: {next_essay}")
+  send_to_discord(webhook_url, next_essay)
+  save_sent_link(next_essay)
