@@ -2,9 +2,11 @@ name: Daily New Yorker Essay Delivery
 
 on:
   schedule:
-    # Runs every day at 12:00 PM UTC (Adjust cron timing to preference)
     - cron: '0 12 * * *'
-  workflow_dispatch: # Allows you to trigger it manually from GitHub anytime
+  workflow_dispatch:
+
+permissions:
+  contents: write  # Allows the workflow to save sent.txt back to your repo
 
 jobs:
   run-bot:
@@ -25,3 +27,11 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python bot.py
+
+      - name: Save sent history
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add sent.txt
+          git commit -m "Log sent essay" || exit 0
+          git push
